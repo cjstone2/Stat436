@@ -79,21 +79,39 @@ ui <- fluidPage(
     tabPanel("ESG Grade Distribution",
              sidebarLayout(
                sidebarPanel(
-                 selectInput("env_grade", "Environmental Grade:", choices = c("All", "High", "Medium", "Low")),
-                 selectInput("soc_grade", "Social Grade:", choices = c("All", "High", "Medium", "Low")),
-                 selectInput("gov_grade", "Governance Grade:", choices = c("All", "High", "Medium", "Low")),
-                 selectInput("score_type", "Score Type:", 
+                 helpText("This tool helps investors and stakeholders explore how companies perform in three key areas:" ,tags$strong("Environmental, Social, and Governance (ESG)"),". 
+              With this you can help assess companies' performance, giving insights into sustainability, ethical practices, and risk factors.
+               You can filter companies by performance level:", tags$strong("High, Medium, or Low"), " and view the score distribution for any ESG category in a simple histogram."),
+                 helpText(tags$strong("Filter by ESG Levels")),
+                 selectInput("env_grade", "Select Environmental Grade:", 
+                             choices = c("All", "High", "Medium", "Low")),
+                 selectInput("soc_grade", "Select Social Grade:", 
+                             choices = c("All", "High", "Medium", "Low")),
+                 selectInput("gov_grade", "Select Governance Grade:",
+                             choices = c("All", "High", "Medium", "Low")),
+                 selectInput("score_type", "Select Score Type:",
                              choices = c("Environmental Score" = "environment_score",
                                          "Social Score" = "social_score",
                                          "Governance Score" = "governance_score")),
-                 sliderInput("bin_width", "Bin Width:", min = 5, max = 50, value = 10)
+                 helpText("The red dashed line on the chart shows the average score, giving a quick reference for typical performance."),
+                 sliderInput("bin_width", "Select Bin Width:", min = 5, max = 50, value = 10),
                ),
+               
                mainPanel(
                  plotlyOutput("esgBar"),
+                 br(),
+                 h4(tags$strong("ESG Company Score Table")),
+                 p("Use this table to explore how companies perform on Environmental, Social, and Governance (ESG) criteria.
+        Companies with strong ESG scores often manage risks better, align with ethical practices, and demonstrate a commitment to sustainable growth, making them potentially safer and more responsible investments."),
+                 p(tags$strong("Understanding the Grades:")),
+                 p(tags$strong("High (AAA, AA, A):"),"Indicates strong performance and low risk"),
+                 p(tags$strong("Medium (BBB, BB, B):"),"Reflects moderate performance with some risk"),
+                 p(tags$strong("Low (CCC, C):"),"Shows weaker performance and higher risk"),
                  DT::DTOutput("filteredData")
                )
-             ))
-  )
+             )
+    )
+    )
 )
 
 # Server
@@ -214,25 +232,97 @@ server <- function(input, output, session) {
   })
   
   # Tab 4: ESG Grade Distribution
-  output$esgBar <- renderPlotly({
-    filtered_data <- data4 %>%
-      filter(esg_category == input$env_grade | input$env_grade == "All") %>%
-      mutate(tooltip = paste("Company:", name, "<br>Score:", get(input$score_type)))
-    
-    ggplotly(
-      ggplot(filtered_data, aes_string(x = input$score_type, text = "tooltip")) +
-        geom_histogram(binwidth = input$bin_width, fill = "blue", color = "darkblue", alpha = 0.7) +
-        geom_vline(aes(xintercept = mean(get(input$score_type), na.rm = TRUE)), linetype = "dashed", color = "red") +
-        labs(title = paste("Distribution of", gsub("_", " ", input$score_type)),
-             x = gsub("_", " ", input$score_type), y = "Frequency") +
-        theme_minimal()
-    )
+  palette_colors <- brewer.pal(n = 6, "Blues")
+  
+  filtered_data <- reactive({
+    data4 %>%
+      filter(
+        (esg_category == input$env_grade | input$env_grade == "All") & 
+          (esg_category == input$soc_grade | input$soc_grade == "All") & 
+          (esg_category == input$gov_grade | input$gov_grade == "All")
+      )%>%
+      select(c(name, environment_grade, social_grade, governance_grade, total_grade, environment_score, 
+               social_score, governance_score, total_score))
   })
   
-  output$filteredData <- renderDT({
-    data4 %>%
-      filter(esg_category == input$env_grade | input$env_grade == "All") %>%
-      select(name, environment_score, social_score, governance_score, total_score)
+  output$esgBar <- renderPlotly({
+    if (nrow(filtered_data()) == 0) {
+      plot_ly() %>%
+        layout(
+          title = "No data available for the selected filters",
+          xaxis = list(showticklabels = FALSE),
+          yaxis = list(showticklabels = FALSE)
+        )
+    } else {
+      search_query <- input$filteredData_search
+      is_search_empty <- is.null(search_query) || search_query == ""
+      
+      plot_data <- filtered_data() %>%
+        mutate(
+          search = case_when(
+            !is_search_empty & grepl(search_query, name, ignore.case = TRUE) ~ "Searched Companies",
+            TRUE ~ "All Companies"
+          ),
+          performance_level = case_when(
+            get(input$score_type) >= 500 ~ "High (AAA, AA, A)",
+            get(input$score_type) >= 200 & get(input$score_type) < 500 ~ "Medium (BBB, BB, B)",
+            get(input$score_type) < 200 ~ "Low (CCC, C)"
+          ),
+          tooltip_text = paste("Company:", name, "<br>Score:", get(input$score_type))
+        )
+      
+      ggplotly(
+        ggplot(plot_data, aes_string(x = input$score_type, fill = "search", text = "tooltip_text")) +
+          geom_histogram(
+            data = plot_data %>% filter(search == "All Companies"),
+            binwidth = input$bin_width,
+            color = "blue",
+            alpha = 0.7
+          ) +
+          geom_histogram(
+            data = plot_data %>% filter(search == "Searched Companies"),
+            binwidth = input$bin_width,
+            color = "red",
+            alpha = 1.0
+          ) +
+          scale_fill_manual(
+            values = c(
+              "All Companies" = palette_colors[4],
+              "Searched Companies" = "orange"
+            ),
+            labels = c(
+              "All Companies" = "All Companies",
+              "Searched companies" = ifelse(!is_search_empty, search_query, "Searched Companies")
+            )
+          ) +
+          geom_vline(
+            aes(xintercept = mean(get(input$score_type), na.rm = TRUE)),
+            color = "red",
+            linetype = "dashed",
+            linewidth = 0.7
+          ) +
+          labs(
+            title = paste("Distribution of", gsub("_", " ", tools::toTitleCase(input$score_type))),
+            x = gsub("_", " ", tools::toTitleCase(input$score_type)),
+            y = "Frequency"
+          ) +
+          theme_minimal() +
+          theme(plot.title = element_text(hjust = 0.5)) +
+          annotate("text", x = 200, y = 72, label = "B Grade Min.", color = "red", size = 4, hjust = -0.1) +
+          annotate("text", x = 500, y = 110, label = "A Grade Min.", color = "red", size = 4, hjust = -0.1)
+      ) %>%
+        layout(hovermode = "closest") %>%
+        config(displayModeBar = FALSE)
+    }
+  })
+  
+  output$filteredData <- DT::renderDT({
+    filtered_data()%>%
+      rename(Company = name,  `Environmental Grade` = environment_grade,
+             `Social Grade` = social_grade, `Governance Grade` = governance_grade,
+             `Total Grade` = total_grade,`Environmental Score` = environment_score,
+             `Social Score` = social_score, `Governance Score` = governance_score,
+             `Total Score` = total_score)
   })
 }
 

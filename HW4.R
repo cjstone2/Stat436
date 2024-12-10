@@ -83,29 +83,6 @@ server <- function(input, output) {
       )
   })
   
-  selectedPoints <- reactive({
-    event_data("plotly_selected") %>% 
-      {if (is.null(.)) filteredData() else .} %>% 
-      as.data.frame()
-  })
-  
-  output$carTable <- renderDT({
-    selectedData <- selectedPoints()
-    if (nrow(selectedData) > 0) {
-      filteredData() %>%
-        filter(
-          Electric.Range %in% selectedData$Electric.Range &
-            Base.MSRP %in% selectedData$Base.MSRP
-        ) %>%
-        select(Make, Model, Electric.Range, Base.MSRP, Model.Year) %>%
-        arrange(Make, Model)
-    } else {
-      filteredData() %>%
-        select(Make, Model, Electric.Range, Base.MSRP, Model.Year) %>%
-        arrange(Make, Model)
-    }
-  })
-}
 
 shinyApp(ui = ui, server = server)
 
